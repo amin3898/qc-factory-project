@@ -26,7 +26,6 @@ def get_db():
     finally:
         db.close()
 
-# --- ایجاد کاربر ادمین پیش‌فرض هنگام بالا آمدن سرور ---
 @app.on_event("startup")
 def create_default_admin():
     db = SessionLocal()
@@ -45,8 +44,6 @@ def create_default_admin():
         print(f"خطا در ساخت ادمین پیش‌فرض: {e}")
     finally:
         db.close()
-
-# --- Endpointهای احراز هویت و مدیریت کاربران ---
 
 @app.post("/api/auth/login")
 def login(creds: schemas.UserLogin, db: Session = Depends(get_db)):
@@ -82,6 +79,22 @@ def create_user(user_data: schemas.UserCreate, db: Session = Depends(get_db)):
     db.refresh(new_user)
     return {"message": "کاربر با موفقیت ایجاد شد", "username": new_user.username}
 
+@app.put("/api/admin/users/{user_id}")
+def update_user(user_id: int, user_data: schemas.UserUpdate, db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="کاربر یافت نشد")
+    
+    if user_data.username:
+        user.username = user_data.username
+    if user_data.password and user_data.password.strip():
+        user.password_hash = user_data.password
+    if user_data.role:
+        user.role = user_data.role
+        
+    db.commit()
+    return {"message": "کاربر با موفقیت به‌روزرسانی شد"}
+
 @app.delete("/api/admin/users/{user_id}")
 def delete_user(user_id: int, db: Session = Depends(get_db)):
     user = db.query(models.User).filter(models.User.id == user_id).first()
@@ -90,8 +103,6 @@ def delete_user(user_id: int, db: Session = Depends(get_db)):
     db.delete(user)
     db.commit()
     return {"message": "کاربر با موفقیت حذف شد"}
-
-# --- Endpointهای مربوط به مدل‌ها و استانداردهای مهندسی ---
 
 @app.post("/api/models/", response_model=schemas.ModelOut)
 @app.post("/api/models", response_model=schemas.ModelOut)
@@ -167,8 +178,6 @@ def delete_entire_model(model_code: str, db: Session = Depends(get_db)):
     db.delete(db_model)
     db.commit()
     return {"message": f"مدل {model_code} با موفقیت حذف شد"}
-
-# --- Endpointهای ثبت و گزارش‌گیری بازرسی ---
 
 @app.post("/api/inspections/")
 @app.post("/api/inspections")
