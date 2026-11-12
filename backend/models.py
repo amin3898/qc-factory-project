@@ -88,3 +88,13 @@ class NCReport(Base):
     issued_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     inspection = relationship("Inspection", back_populates="nc_reports")
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(50), unique=True, nullable=False, index=True)
+    password_hash = Column(String(255), nullable=False)
+    role = Column(String(20), default="auditor", nullable=False) # admin, engineer, auditor
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)

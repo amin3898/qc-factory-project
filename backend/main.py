@@ -26,6 +26,71 @@ def get_db():
     finally:
         db.close()
 
+# --- ایجاد کاربر ادمین پیش‌فرض هنگام بالا آمدن سرور ---
+@app.on_event("startup")
+def create_default_admin():
+    db = SessionLocal()
+    try:
+        admin_user = db.query(models.User).filter(models.User.username == "admin").first()
+        if not admin_user:
+            default_admin = models.User(
+                username="admin",
+                password_hash="admin123",
+                role="admin"
+            )
+            db.add(default_admin)
+            db.commit()
+            print("کاربر ادمین پیش‌فرض (admin / admin123) با موفقیت ایجاد شد.")
+    except Exception as e:
+        print(f"خطا در ساخت ادمین پیش‌فرض: {e}")
+    finally:
+        db.close()
+
+# --- Endpointهای احراز هویت و مدیریت کاربران ---
+
+@app.post("/api/auth/login")
+def login(creds: schemas.UserLogin, db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.username == creds.username).first()
+    if not user or user.password_hash != creds.password:
+        raise HTTPException(status_code=401, detail="نام کاربری یا رمز عبور اشتباه است")
+    
+    return {
+        "access_token": f"token-{user.username}",
+        "token_type": "bearer",
+        "role": user.role
+    }
+
+@app.get("/api/admin/users/", response_model=list[schemas.UserOut])
+@app.get("/api/admin/users")
+def get_users(db: Session = Depends(get_db)):
+    return db.query(models.User).all()
+
+@app.post("/api/admin/users/", status_code=201)
+@app.post("/api/admin/users", status_code=201)
+def create_user(user_data: schemas.UserCreate, db: Session = Depends(get_db)):
+    existing = db.query(models.User).filter(models.User.username == user_data.username).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="این نام کاربری قبلاً ثبت شده است")
+    
+    new_user = models.User(
+        username=user_data.username,
+        password_hash=user_data.password,
+        role=user_data.role
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    return {"message": "کاربر با موفقیت ایجاد شد", "username": new_user.username}
+
+@app.delete("/api/admin/users/{user_id}")
+def delete_user(user_id: int, db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="کاربر یافت نشد")
+    db.delete(user)
+    db.commit()
+    return {"message": "کاربر با موفقیت حذف شد"}
+
 # --- Endpointهای مربوط به مدل‌ها و استانداردهای مهندسی ---
 
 @app.post("/api/models/", response_model=schemas.ModelOut)
@@ -89,61 +154,12 @@ def save_station_specs(payload: dict, db: Session = Depends(get_db)):
     db.commit()
     return {"message": "استانداردهای ایستگاه با موفقیت ذخیره شد"}
 
-@app.put("/api/models/{model_code}")
-def update_model_specs(model_code: str, model: schemas.ModelCreate, db: Session = Depends(get_db)):
-    db_model = crud.get_model_by_code(db, code=model_code)
-    if not db_model:
-        raise HTTPException(status_code=404, detail="مدل یافت نشد")
-    
-    if model.specifications:
-        target_station = model.specifications[0].station_code
-        
-        db.query(models.ModelSpecification).filter(
-            models.ModelSpecification.model_id == db_model.id,
-            models.ModelSpecification.station_code == target_station
-        ).delete()
-        
-        for spec in model.specifications:
-            db_spec = models.ModelSpecification(
-                model_id=db_model.id,
-                station_code=spec.station_code,
-                item_key=spec.item_key,
-                item_label=spec.item_label,
-                data_type=spec.data_type,
-                target_value=spec.target_value,
-                min_value=spec.min_value,
-                max_value=spec.max_value,
-                unit=spec.unit
-            )
-            db.add(db_spec)
-        
-        db.commit()
-    return {"message": "استانداردهای ایستگاه با موفقیت ثبت/به‌روزرسانی شد"}
-
-@app.delete("/api/models/{model_code}/stations/{station_code}")
-def delete_model_station(model_code: str, station_code: str, db: Session = Depends(get_db)):
-    db_model = crud.get_model_by_code(db, code=model_code)
-    if not db_model:
-        raise HTTPException(status_code=404, detail="مدل یافت نشد")
-    
-    deleted_count = db.query(models.ModelSpecification).filter(
-        models.ModelSpecification.model_id == db_model.id,
-        models.ModelSpecification.station_code == station_code
-    ).delete()
-    
-    db.commit()
-    if deleted_count == 0:
-        raise HTTPException(status_code=404, detail="ایستگاهی با این نام یافت نشد")
-        
-    return {"message": f"ایستگاه {station_code} با موفقیت حذف شد"}
-
 @app.delete("/api/models/{model_code}")
 def delete_entire_model(model_code: str, db: Session = Depends(get_db)):
     db_model = crud.get_model_by_code(db, code=model_code)
     if not db_model:
         raise HTTPException(status_code=404, detail="مدل یافت نشد")
     
-    # حذف مشخصات وابسته برای جلوگیری از خطای کلید خارجی
     db.query(models.ModelSpecification).filter(
         models.ModelSpecification.model_id == db_model.id
     ).delete()
